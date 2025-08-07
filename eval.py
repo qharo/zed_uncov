@@ -51,7 +51,7 @@ def main(model_path, image_dir, threshold):
     # # The transform should just convert to a [0, 255] tensor
     # # transform = T.Compose([T.Lambda(lambda img: torch.from_numpy(np.array(img)).permute(2, 0, 1).float())])
 
-    CROP_SIZE = 128
+    CROP_SIZE = 256
     print(f"Using a center crop of {CROP_SIZE}x{CROP_SIZE} for inference.")
 
     # The transform should now CROP the image, not resize it.
@@ -65,11 +65,14 @@ def main(model_path, image_dir, threshold):
         try:
             with torch.no_grad():
                 image = Image.open(img_path).convert('RGB')
+                print(f"Raw Image (Before Transform): {image.size}")
                 image_tensor = transform(image).unsqueeze(0).to(device)
+                print(f"Raw Image (After Transform): {image_tensor.shape}")
 
 
 
                 metrics_by_level = srec_compressor(image_tensor)
+                # print(metrics_by_level[0][0].nll_map.shape)
 
                 print(f"\n--- Detailed Analysis for: {os.path.basename(img_path)} ---")
                 d_values = {}

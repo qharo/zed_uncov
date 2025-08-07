@@ -80,13 +80,11 @@ class ResBlock(nn.Module):
 
 
 class Upsampler(nn.Sequential):
-    def __init__(self, scale: int, n_feats: int, bn: bool = False, act: str = "none", bias: bool = True) -> None:
+    def __init__(self, scale: int, n_feats: int, act: str = "none", bias: bool = True) -> None:
         m: List[nn.Module] = []
         for _ in range(int(math.log(scale, 2))):
             m.append(utils.create_conv_layer(n_feats, 4 * n_feats, 3, bias))
             m.append(nn.PixelShuffle(2))
-            if bn:
-                m.append(nn.BatchNorm2d(n_feats))
             m.append(utils.get_activation(act))
         super(Upsampler, self).__init__(*m)
 
@@ -150,13 +148,6 @@ class StrongPixDecoder(nn.Module):
             probs = clf(z)
             lower = torch.max(pix_sum - (3 - i) * 255, torch.tensor(0., device=x.device))
             upper = torch.min(pix_sum, torch.tensor(255., device=x.device))
-
-            def pad(x: torch.Tensor, H: int, W: int) -> torch.Tensor:
-                _, _, xH, xW = x.size()
-                padding = [0, W - xW, 0, H - xH]
-                return F.pad(x, padding, mode="replicate")
-
-
             y_i = yield utils.LogisticMixtureProbability(
                 f"{mode}/{self.scale}_{i}", i, probs, lower, upper
             )
@@ -178,10 +169,16 @@ class StrongPixDecoder(nn.Module):
                 else:
                     lm_params = gen.send(y_slices[i - 1])
 
+                # print(f"LM: Name: {lm_params.name}, Level: {lm_params.pixel_index}, \
+                #     Probs: {lm_params.probs.shape}, Upper: {lm_params.upper.shape}, \
+                #     Lower: {lm_params.lower.shape}")
+
                 logits = lm_params.probs
 
                 # nll_map, entropy_map = get_metrics_from_logits(logits, y_slice)
                 nll_map, entropy_map = self.loss_fn.get_zed_metrics(y_slice, logits)
+
+                # print(f"NLL: {nll_map.shape}, Entropy: {entropy_map.shape}")
 
                 # nll_map = self.loss_fn(y_slice, logits)
                 # log_probs_all = get_log_prob_from_logits(logits, True)
@@ -228,7 +225,16 @@ class Compressor(nn.Module):
         for i, dec, ctx_upsampler, x_level, y_level, in zip(
                 range(len(self.decs)), self.decs, self.ctx_upsamplers,
                 downsampled[::-1], downsampled[-2::-1]):
+            # print(f"Level {i} | x: {x_level.shape} | y: {y_level.shape}")
+            # if type(ctx) == torch.Tensor:
+            #     print(f"ctx (Tensor) shape (B, N_FEAT, H, W): {ctx.shape}")
+            # else:
+            #     print(f"ctx (Float) shape: {ctx}")
+
             ctx = ctx_upsampler(ctx)
+            # if type(ctx) == torch.Tensor:
+            #     print(f"ctx after upsampling (Tensor) shape (B, N_FEAT, H, W): {ctx.shape}")
+
             dec_metrics, ctx = dec(x_level, torch.round(y_level - 0.001), ctx)
 
             level_l = (len(self.decs) - 1) - i
