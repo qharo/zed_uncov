@@ -15,11 +15,7 @@ import model
 from utils import ZEDMetrics
 
 def process_images_batched(srec_model, image_dir, device, batch_size, num_images_per_class):
-    """
-    Processes images in a directory using batching, calculates ZED features,
-    and returns a DataFrame. Randomly samples images if specified.
-    """
-    # Discover classes (subdirectories)
+    # discover classes
     class_dirs = [d.path for d in os.scandir(image_dir) if d.is_dir()]
     if not class_dirs:
         print(f"Error: No subdirectories (classes) found in '{image_dir}'.")
@@ -31,7 +27,7 @@ def process_images_batched(srec_model, image_dir, device, batch_size, num_images
     for class_dir in class_dirs:
         class_name = os.path.basename(class_dir)
 
-        # Gather all images for the current class
+        # gather all images for the current class
         image_paths_in_class = glob.glob(os.path.join(class_dir, '*.*'))
         image_paths_in_class = [p for p in image_paths_in_class if p.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))]
 
@@ -39,7 +35,7 @@ def process_images_batched(srec_model, image_dir, device, batch_size, num_images
             print(f"Warning: No images found for class '{class_name}'.")
             continue
 
-        # Randomly sample if num_images_per_class is specified
+        # randomly sample if num_images_per_class is specified
         if num_images_per_class > 0 and len(image_paths_in_class) > num_images_per_class:
             selected_paths = random.sample(image_paths_in_class, num_images_per_class)
             print(f"  - Class '{class_name}': Randomly selected {len(selected_paths)} of {len(image_paths_in_class)} images.")
@@ -71,11 +67,11 @@ def process_images_batched(srec_model, image_dir, device, batch_size, num_images
 
         for img_path in batch_paths:
             try:
-                # Extract class from folder name, combine real sources
+                # extract class from folder name, combine real sources
                 class_name = os.path.basename(os.path.dirname(img_path))
                 if 'flickr' in class_name.lower() or 'coco' in class_name.lower():
                     class_name = 'REAL'
-                else: # Capitalize AI sources for legend consistency
+                else: # capitalize fake sources for legend consistency
                     class_name = class_name.upper()
 
                 image = Image.open(img_path).convert('RGB')
@@ -131,9 +127,6 @@ def process_images_batched(srec_model, image_dir, device, batch_size, num_images
     return pd.DataFrame(results)
 
 def generate_plots(df, output_dir):
-    """
-    Generates and saves the three plots from Figure 5.
-    """
     if df.empty:
         print("DataFrame is empty. Cannot generate plots.")
         return
@@ -141,18 +134,13 @@ def generate_plots(df, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # --- MODIFICATION ---
-    # The original "viridis" palette is sequential, which is not ideal for
-    # distinguishing discrete categories. A circular palette like "husl"
-    # picks colors that are evenly spaced around the color wheel, making
-    # them highly distinct and suitable for categorical data.
     unique_classes = sorted(df['class'].unique())
     palette = sns.color_palette("husl", n_colors=len(unique_classes))
     color_map = {cls: palette[i] for i, cls in enumerate(unique_classes)}
 
     print("\nGenerating plots...")
 
-    # --- Plot 1: NLL(0) vs H(0) Scatter Plot ---
+    # --- NLL(0) vs H(0) Scatter Plot ---
     plt.figure(figsize=(8, 7))
     sns.scatterplot(data=df, x='H(0)', y='NLL(0)', hue='class', palette=color_map, s=50, alpha=0.7)
     plt.title('NLL(0) vs Entropy H(0)', fontsize=16)
@@ -165,7 +153,7 @@ def generate_plots(df, output_dir):
     plt.close()
     print(f"Saved Plot 1 to {plot1_path}")
 
-    # --- Plot 2: D(0) vs D(2) Scatter Plot ---
+    # --- D(0) vs D(2) Scatter Plot ---
     plt.figure(figsize=(8, 7))
     sns.scatterplot(data=df, x='D(0)', y='D(2)', hue='class', palette=color_map, s=50, alpha=0.7)
     plt.title('Coding Cost Gap D(0) vs D(2)', fontsize=16)
@@ -180,7 +168,7 @@ def generate_plots(df, output_dir):
     plt.close()
     print(f"Saved Plot 2 to {plot2_path}")
 
-    # --- Plot 3: D(0) Histogram ---
+    # --- D(0) Histogram ---
     plt.figure(figsize=(10, 6))
     sns.histplot(data=df, x='D(0)', hue='class', palette=color_map, multiple='layer', bins=50, kde=True)
     plt.title('Distribution of Coding Cost Gap D(0)', fontsize=16)
@@ -195,7 +183,6 @@ def generate_plots(df, output_dir):
 
 
 def main(args):
-    """Main function to load model, process image directory, and generate plots."""
     if not os.path.exists(args.model_path):
         print(f"Error: Model path '{args.model_path}' does not exist.")
         return
@@ -203,11 +190,11 @@ def main(args):
         print(f"Error: Image directory '{args.image_dir}' does not exist.")
         return
 
-    # Setup device
+    # setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    # Load Model
+    # load model
     srec_compressor = model.Compressor().to(device)
     try:
         checkpoint = torch.load(args.model_path, map_location=device)
@@ -222,12 +209,11 @@ def main(args):
     srec_compressor.eval()
     print("Model loaded successfully.")
 
-    # Process images and get features using the batched function with sampling
+    # process images and get features using the batched function with sampling
     df_results = process_images_batched(
         srec_compressor, args.image_dir, device, args.batch_size, args.num_images_per_class
     )
 
-    # Generate and save plots
     if not df_results.empty:
         generate_plots(df_results, args.output_dir)
 
@@ -237,6 +223,6 @@ if __name__ == '__main__':
     parser.add_argument('--image_dir', type=str, default="./images", help='Directory containing subfolders of images to process.')
     parser.add_argument('--output_dir', type=str, default="./output_fig5", help='Directory to save the output plots.')
     parser.add_argument('--batch_size', type=int, default=4, help='Number of images to process in a single batch.')
-    parser.add_argument('--num_images_per_class', type=int, default=100, help='Number of images to randomly sample from each class. Set to 0 to use all images (default).')
+    parser.add_argument('--num_images_per_class', type=int, default=20, help='Number of images to randomly sample from each class. Set to 0 to use all images (default).')
     args = parser.parse_args()
     main(args)

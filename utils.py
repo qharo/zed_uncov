@@ -169,17 +169,10 @@ class DiscretizedMixLogisticLoss(nn.Module):
         Calculates both NLL and Entropy maps from the logits 'l' for the true pixels 'x'.
         This is the new, unified function for our ZED inference.
         """
-        # 1. Get the correctly conditioned distribution parameters.
-        # This reuses the most critical piece of logic from the original class.
         x_unpacked, logit_pis, conditioned_means, log_scales, K = self._extract_non_shared(x, l)
 
-        # 2. Calculate the full log probability distribution for all 256 values.
-        # This logic is adapted from your `get_log_prob_from_logits`.
         xs = torch.arange(256, device=l.device).view(1, 1, 1, 1, 1, -1)
 
-        # We need to broadcast xs to match the shape of conditioned_means (N, C, K, H, W)
-        # The log_cdf function expects (N, C, 1, H, W) for pixels and (N, C, K, H, W) for params.
-        # We will calculate the log_cdf for each of the 256 possible pixel values.
         all_log_probs_per_mixture = []
         for i in range(256):
             pixel_val_tensor = torch.full_like(x_unpacked, float(i))
@@ -189,15 +182,12 @@ class DiscretizedMixLogisticLoss(nn.Module):
         # Shape: (N, C, K, H, W, 256)
         all_log_probs_per_mixture_tensor = torch.cat(all_log_probs_per_mixture, dim=-1)
 
-        # 3. Apply mixture weights to get the final log probability distribution.
         log_weights = F.log_softmax(logit_pis, dim=2).unsqueeze(-1) # Add dimension for broadcasting
         log_probs_all = torch.logsumexp(log_weights + all_log_probs_per_mixture_tensor, dim=2) # Shape: (N, C, H, W, 256)
 
-        # 4. Calculate Entropy from the full distribution.
         entropy_map = calculate_entropy(log_probs_all)
 
-        # 5. Calculate NLL by gathering the log-prob of the true pixel.
-        # This is more direct than calling self.forward() again.
+        # Calculate NLL by gathering the log-prob of the true pixel.
         true_pixel_indices = x.long().unsqueeze(-1) # x is the original N, C, H, W tensor
         log_prob_true_pixel = torch.gather(log_probs_all, -1, true_pixel_indices)
         nll_map = -log_prob_true_pixel.squeeze(-1)

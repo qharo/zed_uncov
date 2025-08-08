@@ -10,50 +10,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.metrics import roc_curve, auc
-
-# It's assumed you have these utility files, if not, these lines might need adjustment.
-# Mocking the dependencies for the script to be self-contained and runnable.
-# In a real scenario, you would have these files.
-class ZEDMetrics:
-    def __init__(self, nll_map, entropy_map):
-        self.nll_map = nll_map
-        self.entropy_map = entropy_map
-
-class MockModel(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.nets = torch.nn.Linear(1, 1) # Dummy layer
-
-    def forward(self, batch):
-        # This mock forward pass returns dummy metrics to allow the script's logic to execute.
-        # It generates random tensors for NLL and Entropy maps.
-        batch_size, _, h, w = batch.shape
-        metrics_by_level = {
-            0: [ZEDMetrics(torch.rand(batch_size, h, w), torch.rand(batch_size, h, w))],
-            1: [ZEDMetrics(torch.rand(batch_size, h, w), torch.rand(batch_size, h, w))]
-        }
-        return metrics_by_level
-
-# Replace 'model' with our mock if the real one isn't available.
-try:
-    import model
-    from utils import ZEDMetrics
-except ImportError:
-    print("Warning: 'model' or 'utils' not found. Using mock classes for demonstration.")
-    model = type('model', (), {'Compressor': MockModel})
-
+import model
+from utils import ZEDMetrics
 
 def process_images_for_pair(srec_model, real_image_paths, fake_image_paths, device, batch_size):
-    """
-    Processes a specific pair of real and fake image lists, calculates decision scores,
-    and returns a DataFrame with scores and their true labels (1 for real, 0 for AI).
-    """
-    # Create a unified list of paths and corresponding labels
     all_paths = real_image_paths + fake_image_paths
-    # 1 for real, 0 for fake
     labels = [1] * len(real_image_paths) + [0] * len(fake_image_paths)
 
-    # Combine paths and labels and shuffle them to ensure batches are mixed
+    # combine paths and labels and shuffle them to ensure batches are mixed
     combined = list(zip(all_paths, labels))
     random.shuffle(combined)
     shuffled_paths, shuffled_labels = zip(*combined)
@@ -113,7 +77,6 @@ def process_images_for_pair(srec_model, real_image_paths, fake_image_paths, devi
                 'score_abs_Delta0': abs(delta0_val),
                 'label': batch_labels[j] # Use the pre-assigned label
             })
-            # --- END MODIFICATION ---
 
     return pd.DataFrame(results)
 
@@ -160,7 +123,7 @@ def generate_roc_plot(df, score_column, output_dir, file_name, plot_title):
 
 def main(args):
     """Main function to orchestrate the pairwise ROC curve generation."""
-    if not os.path.exists(args.model_path) and not isinstance(model.Compressor(), MockModel):
+    if not os.path.exists(args.model_path):
         print(f"Error: Model path '{args.model_path}' does not exist.")
         return
     if not os.path.isdir(args.image_dir):
@@ -172,16 +135,19 @@ def main(args):
 
     # Load Model
     srec_compressor = model.Compressor().to(device)
-    if not isinstance(srec_compressor, MockModel):
-        try:
-            checkpoint = torch.load(args.model_path, map_location=device)
-            state_dict = checkpoint.get('nets', checkpoint)
-            srec_compressor.nets.load_state_dict(state_dict)
-        except KeyError:
-            srec_compressor.load_state_dict(checkpoint)
-        except Exception as e:
-            print(f"Error loading model state_dict: {e}")
-            return
+
+
+    try:
+        checkpoint = torch.load(args.model_path, map_location=device)
+        # adjust key if model is nested in checkpoint
+        state_dict = checkpoint.get('nets', checkpoint)
+        srec_compressor.nets.load_state_dict(state_dict)
+    except KeyError:
+        # fallback for models not saved with the 'nets' key
+        srec_compressor.load_state_dict(checkpoint)
+    except Exception as e:
+        print(f"Error loading model state_dict: {e}")
+        return
     srec_compressor.eval()
     print("Model loaded successfully.")
 
@@ -237,7 +203,6 @@ def main(args):
                 args.batch_size
             )
 
-            # --- MODIFIED PART: Loop through 4 score types and generate a plot for each ---
             if not df_results.empty:
                 score_options = {
                     'score_D0': 'D(0)',
@@ -255,7 +220,6 @@ def main(args):
                         file_name=f'roc_{real_name}_vs_{fake_name}_{file_friendly_label}.png',
                         plot_title=f'ROC Curve for {real_name} vs. {fake_name}\n(Score = {score_label})'
                     )
-            # --- END MODIFICATION ---
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Generate pairwise ROC curves to evaluate AI vs. Real image detection.")
